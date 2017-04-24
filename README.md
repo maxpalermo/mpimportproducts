@@ -9,15 +9,15 @@ Imports product from excel file, with custom parameters.
 - read a xls file and put into associative array
 
 *TODO*
-- [x] Show table data
-- [x] Check products to import 
-- [x] Check products to update
+- [X] Show table data
+- [X] Check products to import 
+- [X] Check products to update
 
 *2017-04-24*
 - Pagination works correctly
 - First attempt to update product
--- description
--- category
+- - description
+- - category
 
 *TODO*
 - [ ] Finish update products
