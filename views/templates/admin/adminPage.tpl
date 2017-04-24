@@ -23,6 +23,11 @@
 *  International Registered Trademark & Property of mpSOFT
 *}
 
+<pre>
+    STATUS:
+    {$status|@print_r}
+</pre>
+
 <form class='defaultForm form-horizontal' method='post' id="form_export_invoices" enctype="multipart/form-data">
     <div class="panel">
         <div class="panel-heading">
@@ -48,11 +53,12 @@
         </div>
     </div>
     <!-- TABLE SECTION -->
+    {if !empty($rows)}
     <div class='panel'>
         <div class='panel-heading'>
             <span>
                 <i class='icon-table'></i>
-                {l s='Invoices List' mod='mpimportproducts'}
+                {l s='Product List' mod='mpimportproducts'}
             </span>
         </div>
         <div class='panel-footer'>
@@ -62,7 +68,9 @@
             </button>
         </div>
         <div class='panel-body'>
-            
+            {$pagination}
+            <br>
+            {$navigator}
         </div>
         <div class='panel-footer'>
             <button type="submit" value="1" id="submit_file_import" name="submit_file_import" class="btn btn-default pull-right">
@@ -71,15 +79,9 @@
             </button>
         </div>
     </div>
+    {/if}
 </form>
 
-            <pre>
-                {$file|print_r}
-                
-                EXCEL:
-                {$rows|print_r}
-            </pre>
-            
 <script type="text/javascript">
     $(window).bind("load",function()
     {    

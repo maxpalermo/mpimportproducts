@@ -51,18 +51,19 @@
     <thead>
         <tr>
             <th><input type="checkbox" name='checkAll' id='checkAll'></th>
-            <th>{l s='id order' mod='mpexportinvoices'}</th>
-            <th>{l s='id invoice' mod='mpexportinvoices'}</th>
-            <th>{l s='number' mod='mpexportinvoices'}</th>
-            <th>{l s='date' mod='mpexportinvoices'}</th>
-            <th>{l s='id customer' mod='mpexportinvoices'}</th>
-            <th>{l s='customer' mod='mpexportinvoices'}</th>
-            <th>{l s='total' mod='mpexportinvoices'}</th>
+            <th>{l s='reference' mod='mpexportinvoices'}</th>
+            <th>{l s='name' mod='mpexportinvoices'}</th>
+            <th>{l s='description' mod='mpexportinvoices'}</th>
+            <th>{l s='category' mod='mpexportinvoices'}</th>
+            <th>{l s='size' mod='mpexportinvoices'}</th>
+            <th>{l s='color' mod='mpexportinvoices'}</th>
+            <th>{l s='type' mod='mpexportinvoices'}</th>
+            <th>{l s='thumb' mod='mpexportinvoices'}</th>
         </tr>
     </thead>
     <tbody>
         {assign var=i value=1}
-        {foreach $invoices as $row}
+        {foreach $rows as $row}
             <tr>
                 <td style='text-align: right;'>
                     <span>
@@ -70,13 +71,14 @@
                         <input type='checkbox' name='checkRow[{$i-1|escape:'htmlall':'UTF-8'}]' {if !empty($checkRow[$i-1])}checked='checked'{/if}>
                     </span>
                 </td>
-                <td style='text-align: right;'>{$row['id_order']|escape:'htmlall':'UTF-8'}</td>
-                <td style='text-align: right;'>{$row['id_order_invoice']|escape:'htmlall':'UTF-8'}</td>
-                <td style='text-align: right;'>{$row['number']|escape:'htmlall':'UTF-8'}</td>
-                <td style='text-align: center;'>{$row['date_add']|escape:'htmlall':'UTF-8'}</td>
-                <td style='text-align: right;'>{$row['id_customer']|escape:'htmlall':'UTF-8'}</td>
-                <td style='text-align: left;' >{{$row['customer']|strtoupper}|escape:'htmlall':'UTF-8'}</td>
-                <td style='text-align: right;'>{displayPrice price=$row['total_paid_tax_incl']|escape:'htmlall':'UTF-8'}</td>
+                <td style='text-align: left;'>{$row['reference']|escape:'htmlall':'UTF-8'}</td>
+                <td style='text-align: left;'>{$row['product name']|escape:'htmlall':'UTF-8'}</td>
+                <td style='text-align: left;'>{$row['description']}</td>
+                <td style='text-align: left;'>{$row['category']|escape:'htmlall':'UTF-8'}</td>
+                <td style='text-align: left;'>{$row['dimensioni']|escape:'htmlall':'UTF-8'}</td>
+                <td style='text-align: left;'>{$row['colori']|escape:'htmlall':'UTF-8'}</td>
+                <td style='text-align: left;' >{{$row['tipo prodotto']|strtoupper}|escape:'htmlall':'UTF-8'}</td>
+                <td style='text-align: center;'><img src="http://isacco.it{$row['thumb']|escape:'htmlall':'UTF-8'}" style='max-height: 128px;'></td>
             </tr>
         {/foreach}
     </tbody>

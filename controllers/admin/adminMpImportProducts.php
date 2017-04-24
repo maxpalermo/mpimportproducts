@@ -28,12 +28,30 @@ require_once _PS_MODULE_DIR_ . 'mpimportproducts/classes/PHPExcel.php';
 
 class AdminMpImportProductsController extends ModuleAdminController
 {
+    private $products;
+    private $display_products;
+    private $file;
+    private $categories;
+    private $titles;
+    private $currentPage;
+    private $currentPagination;
+    
     public function __construct()
     {
         $this->bootstrap = true;
         $this->context = Context::getContext();
         
         parent::__construct();
+        
+        $this->products = array();
+        $this->display_products = array();
+        $this->file = array();
+        $this->categories = array();
+        $this->titles = array();
+        $this->currentPage = 1;
+        $this->currentPagination = 50;
+        $this->lang = Context::getContext()->language->id;
+        $this->status = array();
     }
     
     public function initToolbar()
@@ -49,44 +67,190 @@ class AdminMpImportProductsController extends ModuleAdminController
     
     public function postProcess($params = array())
     {
-        $id_order = Tools::getValue('id_order', 0);
+        $this->getCategories();
         
-        if ((int)$id_order>0) {
-           $this->exportInvoice($id_order); 
-           return;
+        if(Tools::isSubmit('submit_pagination')) {
+            $this->pagination();
         } else {
-            $this->displayPage();
+                if(!empty($_FILES['input_file_upload'])) {
+                $this->file = $_FILES['input_file_upload'];
+                $this->readFile($this->file);
+                $this->pagination();
+                $this->importFile();
+            } else {
+                $this->file = array();
+            }
         }
+        
+        $this->displayPage();
+    }
+    
+    private function pagination()
+    {
+        //Change page
+        $this->currentPage = Tools::getValue('input_select_current_page', '1');
+        $this->currentPagination = Tools::getValue('input_select_current_pagination', '50');
+        $current_pagination = Tools::getValue('input_hidden_current_pagination', '50');
+        //Start session
+        if(session_status() == PHP_SESSION_NONE) {
+            session_start();
+        }
+        //Get products from session
+        $this->products = $_SESSION['rowData'];
+        //Set start pagination
+        if ($this->currentPagination!=$current_pagination) {
+            $start = 1;
+        } else {
+            $start = (($this->currentPage-1)*$this->currentPagination)+1;
+        }
+        //Get pagination from whole array
+        $this->display_products = array_slice($this->products, $start-1, $this->currentPagination);
+        
+        //Calculate pagination
+        $rows = count($this->products);
+        $pages = ceil($rows/ (int)$this->currentPagination);
+        $opt_pages = array();
+        $opt_paginations = array();
+        
+        //Option Pagination
+        $step = 25;
+        for($i=0; $i<10; $i++)
+        {
+            $start = ($i+1) * $step;
+            if($start == $this->currentPagination) {
+                $selected = " selected='selected' ";
+            } else {
+                $selected = "";
+            }
+            $opt_paginations[] = "<option value='" . $start . "'" . $selected . ">" . $start . "</option>";
+        }
+        
+        //Option Pages
+        if($this->currentPagination!=$current_pagination) {
+            $current_pagination = $this->currentPagination;
+            $this->currentPage=1;
+        }
+        
+        for($i=0; $i<$pages; $i++)
+        {
+            if((int)($i+1) == (int)$this->currentPage) {
+                $selected = " selected='selected' ";
+            } else {
+                $selected = "";
+            }
+            
+            $opt_pages[] = "<option value='" . ($i+1) . "'" . $selected . ">" . ($i+1) . "</option>";
+        }
+        
+        $this->opt_pages = $opt_pages;
+        $this->opt_paginations = $opt_paginations;
+        $this->input_hidden_pagination = $current_pagination;
     }
     
     private function displayPage()
-    {      
-        if(!empty($_FILES['input_file_upload'])) {
-            $file = $_FILES['input_file_upload'];
-        } else {
-            $file = array();
-        }
-        
-        
-        if (Tools::isSubmit('submit_file_upload')) {
-            if ($file) {
-                $rowData = $this->readUploadedFile($file);
-            } else {
-                $rowData = array();
-            }
-        }
-        
-        if (Tools::isSubmit('submit_file_import'))
-        {
-            if($file) {
-                $this->importUploadedFile($file);
-            }
-        }
-        
-        $this->context->smarty->assign('rows', $rowData);
-        $this->context->smarty->assign('file', $file);
+    {
+        $this->context->smarty->assign('status', $this->status);
+        $this->context->smarty->assign('opt_pages', implode(PHP_EOL, $this->opt_pages));
+        $this->context->smarty->assign('opt_paginations', implode(PHP_EOL, $this->opt_paginations));
+        $this->context->smarty->assign('titles', $this->titles);
+        $this->context->smarty->assign('rows', $this->display_products);
+        $this->context->smarty->assign('file', $this->file);
+        $this->context->smarty->assign('currentPage', $this->currentPage);
+        $this->context->smarty->assign('currentPagination', $this->currentPagination);
+        $this->context->smarty->assign('hidden_curr_pagination', $this->input_hidden_pagination);
+        $navigator = $this->context->smarty->fetch(_PS_MODULE_DIR_ . $this->module->name . '/views/templates/admin/navigator.tpl');
+        $pagination = $this->context->smarty->fetch(_PS_MODULE_DIR_ . $this->module->name . '/views/templates/admin/pagination.tpl');
+        $this->context->smarty->assign("navigator", $navigator);
+        $this->context->smarty->assign("pagination", $pagination);
         $content = $this->context->smarty->fetch(_PS_MODULE_DIR_ . $this->module->name . '/views/templates/admin/adminPage.tpl');
         $this->context->smarty->assign(array('content' => $this->content . $content));
+    }
+    
+    private function readFile($file)
+    {
+        if (Tools::isSubmit('submit_file_upload')) {
+            if ($file) {
+                $this->readUploadedFile($file);
+            } 
+        }
+    }
+    
+    private function importFile()
+    {
+        if (Tools::isSubmit('submit_file_import'))
+        {
+            $this->importUploadedFile();
+        }
+    }
+    
+    private function importUploadedFile()
+    {
+        
+        $this->status = array();
+        $checks = Tools::getValue('checkRow', array());
+        foreach ($checks as $key=>$value) {
+            $product_row = $this->display_products[(int)$key-1];
+            /**
+             * @var ProductCore $product
+             */
+            $product = $this->getProductByReference($product_row['reference']);
+            if(!empty($product)) {
+                $product->description[$this->lang] = $product_row['description'];
+                $product->description_short[$this->lang] = Tools::substr($product_row['description'],0,599);
+                $product->id_category_default = $product_row['categoria principale'];
+                $this->status[] = "product: " 
+                        . $product->id 
+                        . " (" . $product->reference . ") "
+                        . PHP_EOL . "delete categories: " . $this->deleteCategories($product->id)
+                        . PHP_EOL . "add categories: " . $product_row['categorie secondarie'] . "=> " . $this->addCategories($product, $product_row['categorie secondarie'])
+                        . PHP_EOL . "saved: " .  $product->save();
+                //print "<pre>" .$product_row['reference']  . ", saved: " . $product->save() . "</pre>";
+            } else {
+                $this->status[] = "product: " 
+                        . " (" . $product_row['reference'] . ") "
+                        . "saved: NOT FOUND";
+            }
+        }
+        return;
+    }
+    
+    private function addCategories($product, $categories)
+    {
+        if(empty($categories)) {
+            return;
+        } else {
+            try {
+                $result = $product->addToCategories(explode(',',$categories));
+            } catch (Exception $exc) {
+                return "error: " . $exc->getMessage();
+            }
+            return $result;
+        }
+    }
+    
+    private function deleteCategories($id_product)
+    {
+        if(empty($id_product)) {
+            return "No product id";
+        }
+        $db = Db::getInstance();
+        return $db->delete('category_product', 'id_product = ' . $id_product);
+                
+    }
+    
+    private function getProductByReference($reference)
+    {
+        $db = Db::getInstance();
+        $sql = new DbQueryCore();
+        $sql    ->select("id_product")
+                ->from("product")
+                ->where("reference = '" . $reference . "'");
+        $id = (int) $db->getValue($sql);
+        if ($id>0) {
+            return new ProductCore($id);
+        } else {
+            return null;
+        }
     }
     
     private function readUploadedFile($file)
@@ -107,238 +271,92 @@ class AdminMpImportProductsController extends ModuleAdminController
         $highestRow = $sheet->getHighestRow(); 
         $highestColumn = $sheet->getHighestColumn();
 
-        //  Loop through each row of the worksheet in turn
         // Get column title
         $titles = $sheet->rangeToArray('A1:' . $highestColumn . '1',
                                             NULL,
                                             TRUE,
                                             FALSE);
+        $this->titles = array();
         
-        for ($row = 2; $row <= $highestRow; $row++){ 
-            //  Read a row of data into an array
-            $rowArray[] = $sheet->rangeToArray('A' . $row . ':' . $highestColumn . $row,
+        foreach ($titles[0] as $title)
+        {
+            $this->titles[] = Tools::strtolower($title);
+        }
+                
+        // Get Sheet Values
+        $rowArray = $sheet->rangeToArray('A2:' . $highestColumn . $highestRow,
                                             NULL,
                                             TRUE,
                                             FALSE);
-        }
+        $cols = count($this->titles);
         
-        $rows = count($rowArray);
-        $cols = count($titles[0]);
-        
-        //for ($j=0; $j<count($rowArray); $j++) {
-        for ($j=0; $j<2; $j++) {
+        foreach($rowArray as $row)
+        {
             $rowAssociated = array();
-            $row = $rowArray[$j][0];
-            for ($i=0; $i<count($titles[0]); $i++)
+            for ($i=0; $i<$cols; $i++)
             {
-                $title = Tools::strtolower($titles[0][$i]);
-                $rowAssociated[$title] = $row[$i];                
+                $rowAssociated[$this->titles[$i]] = $row[$i];                
             }
+            $rowAssociated['reference'] = "ISA" . Tools::strtoupper($rowAssociated['id']);
+            $rowAssociated['category'] = $this->categories[(int)$rowAssociated['categoria principale']];
+            $rowAssociated['description'] = $this->makeDescription($rowAssociated);
             $rowData[] = $rowAssociated;
         }
-            
         
-        return $rowData;
-        
+        if(session_status() == PHP_SESSION_NONE) {
+            session_start();
+        }
+        $_SESSION['rowData'] = $rowData;
     }
     
-    private function exportInvoice($id_order)
+    private function makeDescription($row)
     {
-        $db = Db::getInstance();
-        
-        //Check if invoice exists
-        if($db->getValue(
-                'select count(*) from ' 
-                . _DB_PREFIX_ . 'order_invoice '
-                . 'where id_order = ' . $id_order)==0) {
-            $this->displayPage();
-            return;
-        }
-        
-        $sql = new DbQueryCore();
-        
-        $sql    ->select('i.id_order_invoice')
-                ->select('o.id_customer')
-                ->select('o.payment')
-                ->select('o.reference')
-                ->from('order_invoice', 'i')
-                ->innerJoin('orders', 'o', 'o.id_order=i.id_order')
-                ->where('o.id_order = ' . $id_order);
-        $result = $db->getRow($sql);
-        
-        $invoice = new OrderInvoiceCore($result['id_order_invoice']);
-        $invoice->id_customer = $result['id_customer'];
-        $invoice->payment = $result['payment'];
-        $invoice->id_order_invoice = $invoice->id;
-        $invoice->reference = $result['reference'];
-        
-        $row = $this->object_to_array($invoice);
-        
-        $xml = new SimpleXMLElement('<?xml version="1.0" encoding="UTF-8"?><invoices></invoices>');
-        $xml = $this->addInvoice($xml, $row);
-        
-        $filename = dirname(__FILE__) . DIRECTORY_SEPARATOR .".."
-            .DIRECTORY_SEPARATOR . ".."
-            .DIRECTORY_SEPARATOR . "export"
-            .DIRECTORY_SEPARATOR . "invoices(" . date('Ymd-his') . ").xml";
-        
-        $this->context->smarty->assign('xml_invoices', $xml->asXML());
-        $xml->asXML($filename);
-        chmod($filename, 0777);
-        
-        header('Content-disposition: attachment; filename="' . basename($filename) . '"');
-        header('Content-type: "text/xml"; charset="utf8"');
-        readfile($filename);
-        exit();
+        $description = $this->addField($row['descrizione peso tessuto'], 'peso: ') 
+                . $this->addField($row['materiali'], 'materiali: ') 
+                . $this->addField($row['descrizione manica']) 
+                . $this->addField($row['descrizione collo']) 
+                . $this->addField($row['descrizione tasche']) 
+                . $this->addField($row['descrizione taglie'], '', true) 
+                . $this->addField($row['colori'], 'colore: ') 
+                . $this->addField($row['rifiniture']) 
+                . $this->addField($row['id'], 'codice isacco: ', true, true) 
+                . $this->addField($row['descrizione chiusura']) 
+                . $this->addField($row['descrizione num. bottoni']) 
+                . $this->addField($row['vestibilità']) 
+                . $this->addField($row['tessuto'], 'tessuto ') 
+                . $this->addField($row['dettagli']) 
+                . $this->addField($row['tasche grembiule']) 
+                . $this->addField($row['antimacchia'], 'antimacchia: ') 
+                . $this->addField($row['no stiro'], 'no stiro: ') 
+                . $this->addField($row['anti acido - cloro'], 'anti acido/cloro: ');
+        return $description;
     }
     
-    private function getInvoices($dateFrom, $dateTo)
+    private function addField($value, $prefix = '', $upper = false, $bold = false)
     {
-        $db = Db::getInstance();
-        $sql = new DbQueryCore();
-        
-        $sql    ->select('i.id_order')
-                ->select('i.id_order_invoice')
-                ->select('i.number')
-                ->select('o.reference')
-                ->select('i.date_add')
-                ->select('o.id_customer')
-                ->select('CONCAT(c.firstname,\' \',c.lastname) as customer')
-                ->select('i.total_discount_tax_excl')
-                ->select('i.total_products')
-                ->select('i.total_shipping_tax_excl')
-                ->select('i.total_wrapping_tax_excl')
-                ->select('i.total_paid_tax_excl')
-                ->select('i.total_paid_tax_incl')
-                ->select('o.payment')
-                ->from('order_invoice', 'i')
-                ->innerJoin('orders', 'o', 'o.id_order=i.id_order')
-                ->innerJoin('customer', 'c', 'c.id_customer=o.id_customer')
-                ->orderBy('i.date_add')
-                ->orderBy('i.number');
-
-        if (empty($dateFrom) && empty($dateTo)) {
-            //nothing
-        } elseif (!empty($dateFrom) && empty($dateTo)) {
-            $sql->where("i.date_add >= '" . $dateFrom . "'");
-        } elseif (empty($dateFrom) && !empty($dateTo)) {
-            $sql->where("i.date_add <= '" . $dateTo . "'");
-        } elseif (!empty($dateFrom) && !empty($dateTo)) {
-            $sql->where("i.date_add >= '" . $dateFrom
-                    . "' and i.date_add <= DATE_ADD('$dateTo', INTERVAL 1 DAY)");
-        } else {
-            die($this->module->l('Fatal error during date parsing.', $this->moduleName));
-        }
-        
-        $result = $db->executeS($sql);
-        
-        $this->context->smarty->assign('sql', $sql);
-        $this->context->smarty->assign('invoices', $result);
-        if (Tools::isSubmit('submit_invoice_export')) {
-            $checkRow = Tools::getValue('checkRow', array());
-            $this->context->smarty->assign('checkRow', $checkRow);
-            $this->exportInvoices($result, $checkRow);
-        } else {
-            $this->context->smarty->assign('checkRow', array());
-        }
-    }
-    
-    private function exportInvoices($result, $checkRow)
-    {
-        if (count($checkRow)==0) {
-            $this->context->smarty->assign('xml_invoices', 'NO INVOICES SELECTED.');
-            return false;
-        }
-        
-        $xml = new SimpleXMLElement('<?xml version="1.0" encoding="UTF-8"?><invoices></invoices>');
-        
-        $i=1;
-        foreach ($result as $row) {
-            if (!empty($checkRow[$i])) {
-                $xml = $this->addInvoice($xml, $row);
+        $output = '';
+        if(!empty($value))
+        {
+            if ($bold) {
+                $value = "<strong>" . $value . "</strong>";
             }
-            $i++;
+            if($upper) {
+                $output = ' - ' . $prefix . Tools::strtoupper($value) . '<br>';
+            } else {
+                $output = ' - ' . $prefix . Tools::strtolower($value) . '<br>';
+            }
+            return $output;
         }
-        $filename = dirname(__FILE__) . DIRECTORY_SEPARATOR .".."
-            .DIRECTORY_SEPARATOR . ".."
-            .DIRECTORY_SEPARATOR . "export"
-            .DIRECTORY_SEPARATOR . "invoices(" . date('Ymd-his') . ").xml";
-        
-        $this->context->smarty->assign('xml_invoices', $xml->asXML());
-        $xml->asXML($filename);
-        chmod($filename, 0777);
-        
-        header('Content-disposition: attachment; filename="' . basename($filename) . '"');
-        header('Content-type: "text/xml"; charset="utf8"');
-        readfile($filename);
-        exit();
     }
     
-    /**
-     * ADD AN INVOICE ELEMENT TO XML
-     * @param SimpleXMLElement $xml
-     * @param array $row
-     * @return SimpleXMLElement $xml
-     */
-    private function addInvoice($xml, $row)
+    private function getCategories()
     {
-        $dateRow    = $row['date_add'];
-        $createDate = new DateTime($dateRow);
-        $date       = $createDate->format('Y-m-d');
-        
-        $invoice = $xml->addChild('invoice');
-        $invoice->addChild('id_order', $row['id_order']);
-        $invoice->addChild('id_order_invoice', $row['id_order_invoice']);
-        $invoice->addChild('number', $row['number']);
-        $invoice->addChild('reference', $row['reference']);
-        $invoice->addChild('date', $date);
-        $invoice->addChild('id_customer', $row['id_customer']);
-        $invoice->addChild('discounts', $row['total_discount_tax_excl']);
-        $invoice->addChild('products', $row['total_products']);
-        $invoice->addChild('shipping', $row['total_shipping_tax_excl']);
-        $invoice->addChild('wrapping', $row['total_wrapping_tax_excl']);
-        $invoice->addChild('total', $row['total_paid_tax_excl']);
-        $invoice->addChild('payment', $row['payment']);
-        
-        $orderList = OrderDetailCore::getList($row['id_order']);
-        $products = $invoice->addChild('rows');
-        
-        /**
-         * @var OrderDetailCore $product
-         */
-        foreach ($orderList as $product) {
-            //print "<pre>" . print_r($product,1) . "<pre>";
-            
-            //Get tax rate
-            $db = Db::getInstance();
-            $sql = new DbQueryCore();
-            
-            $sql    ->select('t.rate')
-                    ->from('tax', 't')
-                    ->innerJoin('tax_rule', 'tr', 'tr.id_tax=t.id_tax')
-                    ->where('tr.id_tax_rules_group = ' . $product['id_tax_rules_group']);
-            $tax_rate = $db->getValue($sql);
-            
-            //Add row
-            $row_product = $products->addChild('row');
-            $row_product->addChild('ean13', $product['product_ean13']);
-            $row_product->addChild('reference', $product['product_reference']);
-            $row_product->addChild('qty', $product['product_quantity']);
-            $row_product->addChild('price', $product['unit_price_tax_excl']);
-            $row_product->addChild('product_price', $product['product_price']);
-            $row_product->addChild('discount', $product['reduction_percent']);
-            $row_product->addChild('reduction', $product['reduction_amount_tax_excl']);
-            $row_product->addChild('tax_rate', $tax_rate);
+        $categories = CategoryCore::getAllCategoriesName();
+        $this->categories[0] = '';
+        foreach($categories as $category)
+        {
+            $this->categories[$category['id_category']] = $category['name'];
         }
-        
-        if ($this->tableExists(_DB_PREFIX_ . 'mp_advpayment_orders')) {
-            $sql_fee = $this->getFee($product['id_order']);
-            $fee = $invoice->addChild('fees');
-            $fee->addChild('amount', $sql_fee['fees']);
-            $fee->addChild('tax_rate', $sql_fee['tax_rate']);
-        }
-        
-        return $xml;
     }
     
     private function tableExists($tablename)
