@@ -28,6 +28,7 @@ require_once _PS_MODULE_DIR_ . 'mpimportproducts/classes/PHPExcel.php';
 
 class AdminMpImportProductsController extends ModuleAdminController
 {
+    public $lang;
     private $products;
     private $display_products;
     private $file;
@@ -35,6 +36,9 @@ class AdminMpImportProductsController extends ModuleAdminController
     private $titles;
     private $currentPage;
     private $currentPagination;
+    private $opt_pages;
+    private $opt_paginations;
+    private $input_hidden_pagination;
     
     public function __construct()
     {
@@ -52,6 +56,9 @@ class AdminMpImportProductsController extends ModuleAdminController
         $this->currentPagination = 50;
         $this->lang = Context::getContext()->language->id;
         $this->status = array();
+        $this->opt_pages = array();
+        $this->opt_paginations = array();
+        $this->input_hidden_pagination = 50;
     }
     
     public function initToolbar()
@@ -185,8 +192,10 @@ class AdminMpImportProductsController extends ModuleAdminController
     
     private function importUploadedFile()
     {
-        
+        $db = Db::getInstance();
         $this->status = array();
+        $this->status['product'] = array();
+        
         $checks = Tools::getValue('checkRow', array());
         foreach ($checks as $key=>$value) {
             $product_row = $this->display_products[(int)$key-1];
@@ -194,35 +203,193 @@ class AdminMpImportProductsController extends ModuleAdminController
              * @var ProductCore $product
              */
             $product = $this->getProductByReference($product_row['reference']);
-            if(!empty($product)) {
-                $product->description[$this->lang] = $product_row['description'];
-                $product->description_short[$this->lang] = Tools::substr($product_row['description'],0,599);
-                $product->id_category_default = $product_row['categoria principale'];
-                $this->status[] = "product: " 
-                        . $product->id 
-                        . " (" . $product->reference . ") "
-                        . PHP_EOL . "delete categories: " . $this->deleteCategories($product->id)
-                        . PHP_EOL . "add categories: " . $product_row['categorie secondarie'] . "=> " . $this->addCategories($product, $product_row['categorie secondarie'])
-                        . PHP_EOL . "saved: " .  $product->save();
-                //print "<pre>" .$product_row['reference']  . ", saved: " . $product->save() . "</pre>";
-            } else {
-                $this->status[] = "product: " 
-                        . " (" . $product_row['reference'] . ") "
-                        . "saved: NOT FOUND";
-            }
+            $reference = Tools::strtoupper(trim($product_row['reference']));
+            
+            if(!empty($reference)) {
+                $this->status['product'][$reference] = array();
+
+                if(!empty($product)) {
+                    $product->reference = $reference;
+                    $product->name[$this->lang] = $product_row['name'];
+                    $product->description[$this->lang] = $product_row['description long'];
+                    $product->description_short[$this->lang] = Tools::substr($product_row['description'],0,599);
+                    $product->id_category_default = $product_row['category default'];
+                    $save = $product->save();
+
+                    $this->importImage($product_row['image'], $product->id, $product->name);
+
+                    //Delete old features reference
+                    $db->delete('feature_product','id_product = ' . $product->id);
+                    //Add features
+                    foreach ($product_row as $key=>$value)
+                    {
+                        if(trim($value)) {
+                            if(Tools::strpos($key, 'caratteristica')!==false) {
+                                $featureName = Tools::substr($key, Tools::strlen('caratteristica '));
+                                $status = $this->addFeatureProduct($product->id, $featureName, $value, $reference);
+                                $this->status['product'][$reference]['status'] = array($status);
+                            }
+                        }
+                    }
+
+                    $deleteCategories = $this->deleteCategories($product->id);
+                    $categoryDefault = $product_row['category default'];
+                    $categoryOther = $product_row['category other'];
+                    $addDefaultCategory = $this->addCategories($product, $categoryDefault);
+                    $addOtherCategories = $this->addCategories($product, $categoryOther);
+
+                    $this->status['product'][$reference]['result'] = array("product: " . $product->id 
+                            . " (" . $product->reference . ") <ul>"
+                            . "<li>delete categories: " . $deleteCategories . "</li>"
+                            . "<li>add default category: " . $categoryDefault . "=> " . $addDefaultCategory . "</li>"
+                            . "<li>add categories: " . $categoryOther . "=> " . $addOtherCategories . "</li>"
+                            . "<li>saved: " .  $save . "</li></ul>");
+                } else {
+                    $this->status['product'][$reference]['missing'] = array("product: $reference NOT FOUND");
+                }
+            }   
         }
         return;
     }
     
+    private function addFeatureProduct($id_product, $featureName, $featureValue, $reference)
+    {   
+        $this->status['product'][$reference]['features'] = array("<ul>" 
+                . "<li>id_product : <strong>" . $id_product . "</strong></li>"
+                . "<li>feature_name : <strong>" . $featureName . "</strong></li>"
+                . "<li>feature_value: <strong>" . $featureValue . "</strong></ul>");
+        
+        $db = Db::getInstance();
+        
+        //Get Feature id or create a new feature
+        $sqlName = new DbQueryCore();
+        $sqlName->select('id_feature')
+                ->from('feature_lang')
+                ->where('id_lang = ' . $this->lang)
+                ->where("name like '%" . pSQL($featureName) . "%'");
+        $id_feature_name = (int)$db->getValue($sqlName);
+        if (!$id_feature_name) {
+            $id_feature_name = (int)$this->addFeature($featureName);
+        }
+        
+        //Get feature value array
+        $results = array();
+        $arrValues = explode(",",$featureValue);
+        foreach($arrValues as $value)
+        {
+            $sqlValue = new DbQueryCore();
+            $sqlValue->select('id_feature_value')
+                    ->from('feature_value_lang')
+                    ->where('id_lang = ' . $this->lang)
+                    ->where("value like '%" . pSQL($value) . "%'");
+
+
+            $id_feature_value = (int)$db->getValue($sqlValue);
+
+            if (!$id_feature_value) {
+               $id_feature_value =  (int)$this->addFeatureValue($id_feature_name, $value);
+            }
+            
+            if ($id_feature_name==0 && $id_feature_value==0) {
+                $this->status['product'][$reference]['features']['values'] = array('ERROR: <ul>'
+                        . '<li>id_product: <strong>' . $id_product . "</strong></li>"
+                        . '<li>id_feature: <strong>' . $id_feature_name  . ", " . $featureName . "</strong></li>"
+                        . '<li>id_feature_value: <strong>' . $id_feature_value . ", " . $value ."</strong></li></ul>");
+                return;
+            }
+
+            try {
+                $result = $db->insert(
+                    'feature_product',
+                    array(
+                        'id_feature' => $id_feature_name,
+                        'id_product' => $id_product,
+                        'id_feature_value' => $id_feature_value,
+                        'position' => 1
+                    )
+                );
+                $this->status['product'][$reference]['features']['saved'] = array($result); 
+            } catch (Exception $exc) {
+                $result = "ERROR: " . $exc->getMessage();
+                $this->status['product'][$reference]['features']['saved'] = array("error: " . $result); 
+            }
+
+            array_push($results, $result);
+        }
+        
+        return $results;
+    }
+    
+    private function addFeature($name)
+    {
+        $feature = new FeatureCore();
+        $feature->name[$this->lang] = Tools::strtolower($name);
+        $feature->id_shop_list = array(1);
+        try {
+            $result = $feature->save();
+        } catch (Exception $exc) {
+            $result = $exc->getMessage();
+        }
+        
+        $id_feature = $feature->id;
+        $this->status['product']['new feature'][] = $result;
+        
+        if($result===true) {
+            return $id_feature;
+        } else {
+            return false;
+        }
+        
+    }
+    
+    private function addFeatureValue($id_feature, $value)
+    {
+        $feature = new FeatureValueCore();
+        $feature->id_feature = $id_feature;
+        $feature->id_shop_list = array(1);
+        $feature->value[$this->lang] = Tools::strtoupper($value);
+        try {
+            $result = $feature->save();
+        } catch (Exception $exc) {
+            $result = $exc->getMessage();
+        }
+        
+        $id_feature_value = $feature->id;
+        $this->status['product']['new feature value'][] = $result;
+        
+        if($result===true) {
+            return $id_feature_value;
+        } else {
+            return false;
+        }
+    }
+    
+    /**
+     * 
+     * @param ProductCore $product Product object
+     * @param String $categories Categories string comma separated 
+     * @return String result message
+     */
     private function addCategories($product, $categories)
     {
-        if(empty($categories)) {
-            return;
+        if(empty(trim($categories))) {
+            return "No categories to associate.";
         } else {
+            $db = Db::getInstance();
+            
             try {
-                $result = $product->addToCategories(explode(',',$categories));
+                $categories_array = explode(",", $categories);
+                foreach($categories_array as $id_category)
+                {
+                    $result = $db->insert('category_product', array(
+                        'id_category' => (int)$id_category,
+                        'id_product' => (int)$product->id,
+                        'position' => 0,
+                    ));
+                }
+                $result = "categories:" . print_r($product->getCategories(), 1);
             } catch (Exception $exc) {
-                return "error: " . $exc->getMessage();
+                return "error adding to category: " . $exc->getMessage();
             }
             return $result;
         }
@@ -236,6 +403,21 @@ class AdminMpImportProductsController extends ModuleAdminController
         $db = Db::getInstance();
         return $db->delete('category_product', 'id_product = ' . $id_product);
                 
+    }
+    
+    /**
+     * Check if a product exists in archive
+     * @param string $reference product reference to check
+     * @return int count if exists returns 1, 0 otherwise
+     */
+    private function productExists($reference)
+    {
+        $db = Db::getInstance();
+        $sql = new DbQueryCore();
+        $sql    ->select("count(*)")
+                ->from("product")
+                ->where("reference = '" . $reference . "'");
+        return (int)$db->getValue($sql);
     }
     
     private function getProductByReference($reference)
@@ -297,9 +479,9 @@ class AdminMpImportProductsController extends ModuleAdminController
             {
                 $rowAssociated[$this->titles[$i]] = $row[$i];                
             }
-            $rowAssociated['reference'] = "ISA" . Tools::strtoupper($rowAssociated['id']);
-            $rowAssociated['category'] = $this->categories[(int)$rowAssociated['categoria principale']];
+            $rowAssociated['category'] = $this->categories[(int)$rowAssociated['category default']];
             $rowAssociated['description'] = $this->makeDescription($rowAssociated);
+            $rowAssociated['exists'] = $this->productExists($rowAssociated['reference']);
             $rowData[] = $rowAssociated;
         }
         
@@ -311,40 +493,25 @@ class AdminMpImportProductsController extends ModuleAdminController
     
     private function makeDescription($row)
     {
-        $description = $this->addField($row['descrizione peso tessuto'], 'peso: ') 
-                . $this->addField($row['materiali'], 'materiali: ') 
-                . $this->addField($row['descrizione manica']) 
-                . $this->addField($row['descrizione collo']) 
-                . $this->addField($row['descrizione tasche']) 
-                . $this->addField($row['descrizione taglie'], '', true) 
-                . $this->addField($row['colori'], 'colore: ') 
-                . $this->addField($row['rifiniture']) 
-                . $this->addField($row['id'], 'codice isacco: ', true, true) 
-                . $this->addField($row['descrizione chiusura']) 
-                . $this->addField($row['descrizione num. bottoni']) 
-                . $this->addField($row['vestibilità']) 
-                . $this->addField($row['tessuto'], 'tessuto ') 
-                . $this->addField($row['dettagli']) 
-                . $this->addField($row['tasche grembiule']) 
-                . $this->addField($row['antimacchia'], 'antimacchia: ') 
-                . $this->addField($row['no stiro'], 'no stiro: ') 
-                . $this->addField($row['anti acido - cloro'], 'anti acido/cloro: ');
+        $description = '';
+        foreach($row as $key=>$value)
+        {
+            if(Tools::strpos($key, 'DESC ')!==false) {
+                $key = Tools::substr($key, Tools::strlen('DESC  '));
+                $description .= $this->addField($key, $value);
+            }
+        }
         return $description;
     }
     
-    private function addField($value, $prefix = '', $upper = false, $bold = false)
+    private function addField($key, $value)
     {
         $output = '';
         if(!empty($value))
         {
-            if ($bold) {
-                $value = "<strong>" . $value . "</strong>";
-            }
-            if($upper) {
-                $output = ' - ' . $prefix . Tools::strtoupper($value) . '<br>';
-            } else {
-                $output = ' - ' . $prefix . Tools::strtolower($value) . '<br>';
-            }
+            $value = "<strong>" . $value . "</strong>";
+            $output = ' - ' . $key . ": " . Tools::strtoupper($value) . '<br>';
+            
             return $output;
         }
     }
@@ -369,25 +536,6 @@ class AdminMpImportProductsController extends ModuleAdminController
         }
     }
     
-    private function getFee($id_order)
-    {
-        $db = Db::getInstance();
-        $sql = new DbQueryCore();
-        
-        $sql    ->select('fees')
-                ->select('tax_rate')
-                ->from('mp_advpayment_orders')
-                ->where('id_order = ' . $id_order);
-        
-        
-        $result = $db->getRow($sql);
-        
-        $this->context->smarty->assign('sql_fees', $sql);
-        $this->context->smarty->assign('result_fees', $result);
-        
-        return $result;
-    }
-    
     private function object_to_array($data)
     {
         if (is_array($data) || is_object($data))
@@ -400,5 +548,31 @@ class AdminMpImportProductsController extends ModuleAdminController
             return $result;
         }
         return $data;
+    }
+    
+    private function importImage($imagePath, $product_id, $legend)
+    {
+        //import image
+        $chunks = explode(".",$imagePath);
+        $format = end($chunks); //file extension
+
+        $image = new ImageCore();
+        $image->cover=false;
+        $image->force_id=false;
+        $image->id=0;
+        $image->id_image=0;
+        $image->id_product = $product_id;
+        $image->image_format = $format;
+        $image->legend = $legend;
+        $image->position=0;
+        $image->source_index='';
+        $image->add();
+
+        $imageTargetFolder = _PS_PROD_IMG_DIR_ . ImageCore::getImgFolderStatic($image->id);
+        if (!file_exists($imageTargetFolder)) {
+            mkdir($imageTargetFolder, 0777, true);
+        }
+        $target = $imageTargetFolder . $image->id . '.' . $image->image_format;
+        $copy = copy($imagePath, $target);
     }
 }

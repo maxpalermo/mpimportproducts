@@ -22,3 +22,10 @@ Imports product from excel file, with custom parameters.
 *TODO*
 - [ ] Finish update products
 - [ ] Try to insert new products
+
+*2017-04-26*
+- Import product features
+
+*TODO*
+ - [ ] Fix import product
+ - [ ] Import attributes

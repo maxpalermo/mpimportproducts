@@ -71,13 +71,21 @@
                         <input type='checkbox' name='checkRow[{$i-1|escape:'htmlall':'UTF-8'}]' {if !empty($checkRow[$i-1])}checked='checked'{/if}>
                     </span>
                 </td>
-                <td style='text-align: left;'>{$row['reference']|escape:'htmlall':'UTF-8'}</td>
-                <td style='text-align: left;'>{$row['product name']|escape:'htmlall':'UTF-8'}</td>
+                <td style='text-align: left;'>
+                    {if $row['exists']>0}
+                        {$row['reference']|escape:'htmlall':'UTF-8'}
+                    {else}
+                        <span style='color: #a11; font-weight: bold;'>
+                            {$row['reference']|escape:'htmlall':'UTF-8'}
+                        </span>
+                    {/if}
+                </td>
+                <td style='text-align: left;'>{$row['name']|escape:'htmlall':'UTF-8'}</td>
                 <td style='text-align: left;'>{$row['description']}</td>
                 <td style='text-align: left;'>{$row['category']|escape:'htmlall':'UTF-8'}</td>
-                <td style='text-align: left;'>{$row['dimensioni']|escape:'htmlall':'UTF-8'}</td>
-                <td style='text-align: left;'>{$row['colori']|escape:'htmlall':'UTF-8'}</td>
-                <td style='text-align: left;' >{{$row['tipo prodotto']|strtoupper}|escape:'htmlall':'UTF-8'}</td>
+                <td style='text-align: left;'>{$row['descrizione taglie']|escape:'htmlall':'UTF-8'}</td>
+                <td style='text-align: left;'>{$row['descrizione colore']|escape:'htmlall':'UTF-8'}</td>
+                <td style='text-align: left;' >{{$row['caratteristica tipo prodotto']|strtoupper}|escape:'htmlall':'UTF-8'}</td>
                 <td style='text-align: center;'><img src="http://isacco.it{$row['thumb']|escape:'htmlall':'UTF-8'}" style='max-height: 128px;'></td>
             </tr>
         {/foreach}
