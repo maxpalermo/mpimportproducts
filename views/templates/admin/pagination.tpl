@@ -83,10 +83,10 @@
                 <td style='text-align: left;'>{$row['name']|escape:'htmlall':'UTF-8'}</td>
                 <td style='text-align: left;'>{$row['description']}</td>
                 <td style='text-align: left;'>{$row['category']|escape:'htmlall':'UTF-8'}</td>
-                <td style='text-align: left;'>{$row['descrizione taglie']|escape:'htmlall':'UTF-8'}</td>
-                <td style='text-align: left;'>{$row['descrizione colore']|escape:'htmlall':'UTF-8'}</td>
-                <td style='text-align: left;' >{{$row['caratteristica tipo prodotto']|strtoupper}|escape:'htmlall':'UTF-8'}</td>
-                <td style='text-align: center;'><img src="http://isacco.it{$row['thumb']|escape:'htmlall':'UTF-8'}" style='max-height: 128px;'></td>
+                <td style='text-align: left;'>{$row['desc taglie']|escape:'htmlall':'UTF-8'}</td>
+                <td style='text-align: left;'>{$row['desc colore']|escape:'htmlall':'UTF-8'}</td>
+                <td style='text-align: left;' >{{$row['feat tipo prodotto']|strtoupper}|escape:'htmlall':'UTF-8'}</td>
+                <td style='text-align: center;'><img src="{$row['thumb']|escape:'htmlall':'UTF-8'}" style='max-height: 128px;'></td>
             </tr>
         {/foreach}
     </tbody>

@@ -24,6 +24,8 @@
  *  International Registered Trademark & Property of mpSOFT
  */
 
+ini_set('max_execution_time', 300); //300 seconds = 5 minutes
+
 require_once _PS_MODULE_DIR_ . 'mpimportproducts/classes/PHPExcel.php';
 
 class AdminMpImportProductsController extends ModuleAdminController
@@ -39,6 +41,7 @@ class AdminMpImportProductsController extends ModuleAdminController
     private $opt_pages;
     private $opt_paginations;
     private $input_hidden_pagination;
+    private $output;
     
     public function __construct()
     {
@@ -55,7 +58,7 @@ class AdminMpImportProductsController extends ModuleAdminController
         $this->currentPage = 1;
         $this->currentPagination = 50;
         $this->lang = Context::getContext()->language->id;
-        $this->status = array();
+        $this->output = array();
         $this->opt_pages = array();
         $this->opt_paginations = array();
         $this->input_hidden_pagination = 50;
@@ -156,7 +159,7 @@ class AdminMpImportProductsController extends ModuleAdminController
     
     private function displayPage()
     {
-        $this->context->smarty->assign('status', $this->status);
+        $this->context->smarty->assign('status', $this->output);
         $this->context->smarty->assign('opt_pages', implode(PHP_EOL, $this->opt_pages));
         $this->context->smarty->assign('opt_paginations', implode(PHP_EOL, $this->opt_paginations));
         $this->context->smarty->assign('titles', $this->titles);
@@ -193,8 +196,8 @@ class AdminMpImportProductsController extends ModuleAdminController
     private function importUploadedFile()
     {
         $db = Db::getInstance();
-        $this->status = array();
-        $this->status['product'] = array();
+        $this->output = array();
+        $this->output['product'] = array();
         
         $checks = Tools::getValue('checkRow', array());
         foreach ($checks as $key=>$value) {
@@ -206,7 +209,7 @@ class AdminMpImportProductsController extends ModuleAdminController
             $reference = Tools::strtoupper(trim($product_row['reference']));
             
             if(!empty($reference)) {
-                $this->status['product'][$reference] = array();
+                $this->output['product'][$reference] = array();
 
                 if(!empty($product)) {
                     $product->reference = $reference;
@@ -224,28 +227,36 @@ class AdminMpImportProductsController extends ModuleAdminController
                     foreach ($product_row as $key=>$value)
                     {
                         if(trim($value)) {
-                            if(Tools::strpos($key, 'caratteristica')!==false) {
-                                $featureName = Tools::substr($key, Tools::strlen('caratteristica '));
+                            if(Tools::strpos(Tools::strtolower($key), 'feat ')!==false) {
+                                $featureName = Tools::substr($key, Tools::strlen('feat '));
                                 $status = $this->addFeatureProduct($product->id, $featureName, $value, $reference);
-                                $this->status['product'][$reference]['status'] = array($status);
+                                $this->output['product'][$reference]['status'][] = array($status);
                             }
                         }
                     }
-
+                    
+                    //Delete old categories reference
                     $deleteCategories = $this->deleteCategories($product->id);
+                    //Add new categories
                     $categoryDefault = $product_row['category default'];
                     $categoryOther = $product_row['category other'];
                     $addDefaultCategory = $this->addCategories($product, $categoryDefault);
                     $addOtherCategories = $this->addCategories($product, $categoryOther);
 
-                    $this->status['product'][$reference]['result'] = array("product: " . $product->id 
+                    //Delete old attributes reference
+                    $deleteAttributes = $this->deleteAttributes($product->id);
+                    //Add new attributes
+                    $addAttributes = $this->addAttributes($product->id, $product_row);
+                    
+                    $this->output['product'][$reference]['result'] = array("product: " . $product->id 
                             . " (" . $product->reference . ") <ul>"
                             . "<li>delete categories: " . $deleteCategories . "</li>"
                             . "<li>add default category: " . $categoryDefault . "=> " . $addDefaultCategory . "</li>"
                             . "<li>add categories: " . $categoryOther . "=> " . $addOtherCategories . "</li>"
+                            . "<li>del attributes: " . print_r($deleteAttributes, 1) . "</li>"
                             . "<li>saved: " .  $save . "</li></ul>");
                 } else {
-                    $this->status['product'][$reference]['missing'] = array("product: $reference NOT FOUND");
+                    $this->output['product'][$reference]['missing'] = array("product: $reference NOT FOUND");
                 }
             }   
         }
@@ -254,11 +265,6 @@ class AdminMpImportProductsController extends ModuleAdminController
     
     private function addFeatureProduct($id_product, $featureName, $featureValue, $reference)
     {   
-        $this->status['product'][$reference]['features'] = array("<ul>" 
-                . "<li>id_product : <strong>" . $id_product . "</strong></li>"
-                . "<li>feature_name : <strong>" . $featureName . "</strong></li>"
-                . "<li>feature_value: <strong>" . $featureValue . "</strong></ul>");
-        
         $db = Db::getInstance();
         
         //Get Feature id or create a new feature
@@ -267,10 +273,21 @@ class AdminMpImportProductsController extends ModuleAdminController
                 ->from('feature_lang')
                 ->where('id_lang = ' . $this->lang)
                 ->where("name like '%" . pSQL($featureName) . "%'");
+        
         $id_feature_name = (int)$db->getValue($sqlName);
-        if (!$id_feature_name) {
+        if ($id_feature_name==0) {
             $id_feature_name = (int)$this->addFeature($featureName);
         }
+        
+        $featureDbName = new FeatureCore($id_feature_name);
+        
+        $this->output['product'][$reference]['features']['addFeature'][] = "<ul>" 
+                . "<li>id_product : <strong>" . $id_product . "</strong></li>"
+                . "<li>feature_name : <strong>" . $featureName . "</strong></li>"
+                . "<li>feature_value: <strong>" . $featureValue . "</strong></li>"
+                . "<li>sql: " . $sqlName->__toString() . "</li>"
+                . "<li>id feature: $featureName = " . $id_feature_name . "</li>"
+                . "<li>db feature: ($id_feature_name) " . $featureDbName->name[$this->lang] . "</li></ul>";
         
         //Get feature value array
         $results = array();
@@ -286,15 +303,15 @@ class AdminMpImportProductsController extends ModuleAdminController
 
             $id_feature_value = (int)$db->getValue($sqlValue);
 
-            if (!$id_feature_value) {
+            if ($id_feature_value==0) {
                $id_feature_value =  (int)$this->addFeatureValue($id_feature_name, $value);
             }
             
             if ($id_feature_name==0 && $id_feature_value==0) {
-                $this->status['product'][$reference]['features']['values'] = array('ERROR: <ul>'
+                $this->output['product'][$reference]['features']['values'][] = 'ERROR: <ul>'
                         . '<li>id_product: <strong>' . $id_product . "</strong></li>"
                         . '<li>id_feature: <strong>' . $id_feature_name  . ", " . $featureName . "</strong></li>"
-                        . '<li>id_feature_value: <strong>' . $id_feature_value . ", " . $value ."</strong></li></ul>");
+                        . '<li>id_feature_value: <strong>' . $id_feature_value . ", " . $value ."</strong></li></ul>";
                 return;
             }
 
@@ -308,10 +325,10 @@ class AdminMpImportProductsController extends ModuleAdminController
                         'position' => 1
                     )
                 );
-                $this->status['product'][$reference]['features']['saved'] = array($result); 
+                $this->output['product'][$reference]['features']['saved'][] = $result; 
             } catch (Exception $exc) {
                 $result = "ERROR: " . $exc->getMessage();
-                $this->status['product'][$reference]['features']['saved'] = array("error: " . $result); 
+                $this->output['product'][$reference]['features']['saved'][] = "error: " . $result; 
             }
 
             array_push($results, $result);
@@ -332,7 +349,7 @@ class AdminMpImportProductsController extends ModuleAdminController
         }
         
         $id_feature = $feature->id;
-        $this->status['product']['new feature'][] = $result;
+        $this->output['product']['new feature'][] = $result;
         
         if($result===true) {
             return $id_feature;
@@ -355,7 +372,7 @@ class AdminMpImportProductsController extends ModuleAdminController
         }
         
         $id_feature_value = $feature->id;
-        $this->status['product']['new feature value'][] = $result;
+        $this->output['product']['new feature value'][] = $result;
         
         if($result===true) {
             return $id_feature_value;
@@ -403,6 +420,166 @@ class AdminMpImportProductsController extends ModuleAdminController
         $db = Db::getInstance();
         return $db->delete('category_product', 'id_product = ' . $id_product);
                 
+    }
+    
+    private function deleteAttributes($id_product)
+    {
+        if(empty($id_product)) {
+            return "No product id";
+        }
+        $db = Db::getInstance();
+        $sql = new DbQueryCore();
+        
+        $sql->select('id_product_attribute')
+                ->from('product_attribute')
+                ->where('id_product = ' . $id_product);
+        
+        $result = $db->executeS($sql);
+        
+        $ids_array = array();
+        
+        if(count($result)==0) {
+            return "No Attribute to delete for product " . $id_product;
+        }
+        
+        foreach($result as $id) {
+            $ids_array[] = $id['id_product_attribute'];
+        }
+        $ids = implode(",", $ids_array);
+        
+        $this->output['delAttributes'][] = "QUERY: " . $sql->__toString();
+        $this->output['delAttributes'][] = "RESULT: " . print_r($result, 1);
+        $this->output['delAttributes'][] = "IDS: " . $ids;
+        $this->output['delAttributes'][] = "product_attribute_group: " . $db->delete('product_attribute_shop', 'id_product_attribute in (' . $ids . ")");
+        $this->output['delAttributes'][] = "product_attribute_combination: " . $db->delete('product_attribute_combination', 'id_product_attribute in (' . $ids . ")");
+        $this->output['delAttributes'][] = "product_attribute: " . $db->delete('product_attribute', 'id_product_attribute in (' . $ids . ")");
+        
+        //Delete images
+        $sql_img = new DbQueryCore();
+        $sql_img->select('id_image')
+                ->from('product_attribute_image')
+                ->where('id_product_attribute in (' . $ids . ")");
+        $img_array = $db->executeS($sql_img);
+        foreach($img_array as $img)
+        {
+            $id_img = $img['id_image'];
+            $image = new ImageCore($id_img);
+            $image->deleteImage();
+        }
+        $this->output['delAttributes'][] = "product_attribute_image: " . $db->delete('product_attribute_image', 'id_product_attribute in (' . $ids . ")");
+        
+        return $this->output['delAttributes'];
+    }
+    
+    private function addAttributes($id_product, $row)
+    {
+        $this->output[__FUNCTION__]['summary'][] = print_r(func_get_args(), 1);
+        $db = Db::getInstance();
+        //Get attribute values
+        foreach($row as $key=>$value)
+        {
+            if($this->contains('attr ', $key)) {
+                $attribute = Tools::substr($key, Tools::strlen('attr '));
+                $attribute_group_id = $this->getAttributeGroup($attribute);
+                $attribute_id = $this->getAttribute($value);
+                
+                $product = new ProductCore($id_product);
+                //Add attribute to product
+                try {
+                    $db->insert(
+                            'product_attribute',
+                            array(
+                                'id_product' => $product->id,
+                                'reference' => $product->reference,
+                                'supplier_reference' => $product->supplier_reference,                                
+                            )
+                    );
+                    $id_product_attribute = $db->Insert_ID();
+                    
+                    $db->insert(
+                            'product_attribute_combination',
+                            array(
+                                'id_attribute' => $attribute_id,
+                                'id_product_attribute' => $id_product_attribute,
+                            )
+                    );
+                    
+                    $this->output[__FUNCTION__]['attribute'][] = "attribute: " 
+                            . $attribute_group_id 
+                            . "-" . $attribute_id;
+                    $this->output[__FUNCTION__]['combination'][] = "combination: " 
+                            . $id_product_attribute 
+                            . "-" . $attribute_id;
+                    return true;
+                            
+                } catch (Exception $exc) {
+                    $this->output[__FUNCTION__]['error'][] = $exc->getMessage();
+                    return false;
+                }    
+            }
+        }
+    }
+    
+    private function getAttributeGroup($attribute)
+    {
+        //Get type of attribute
+        $type = '';
+        if($this->contains('#', $attribute)) {
+            $pos = Tools::strpos($attribute, "#");
+            $attribute = Tools::substr($attribute, 0, $pos-1);
+            $type = Tools::strtolower(Tools::substr($attribute, $pos-1));
+            $this->output['attribute']['name'][] = $attribute . ", " . $type; 
+        }
+        
+        $db = Db::getInstance;
+        $sql = new DbQueryCore();
+        $sql->select('id_attribute_group')
+                ->from('attribute_group_lang')
+                ->where('id_lang = ' . $this->lang)
+                ->where("name like '" . pSQL($attribute) . "'");
+        $value = (int)$db->getValue($sql);
+        if($value==0) {
+            //Create new attribute group
+            $objAttributeGroup = new AttributeGroupCore();
+            $objAttributeGroup->name[$this->lang] = $attribute;
+            $objAttributeGroup->group_type = $type;
+            $objAttributeGroup->id_shop_list = array(1);
+            $objAttributeGroup->position = 1;
+            $objAttributeGroup->public_name[$this->lang] = $attribute;
+            $objAttributeGroup->save();
+            return $objAttributeGroup->id;
+        } else {
+            return $value;
+        }      
+    }
+    
+    private function getAttribute($attribute)
+    {
+        //Get color code
+        $color = '';
+        if($this->contains('#', $attribute)) {
+            $pos = Tools::strpos($attribute, "#");
+            $attribute = Tools::substr($attribute, 0, $pos-1);
+            $color = Tools::strtolower(Tools::substr($attribute, $pos-1));
+            $this->output['attribute']['name'][] = $attribute . ", " . $color; 
+        }
+        
+        $db = Db::getInstance;
+        $sql = new DbQueryCore();
+        $sql->select('id_attribute')
+                ->from('attribute_lang')
+                ->where('id_lang = ' . $this->lang)
+                ->where("name like '" . pSQL($attribute) . "'");
+        $value = (int)$db->getValue($sql);
+        if($value==0) {
+            //Create new attribute
+            $objAttribute = new AttributeCore();
+            $objAttribute->name[$this->lang] = $attribute;
+            $objAttribute->position = 1;
+            $objAttribute->default = true;
+            $objAttribute->color = $color;
+            $objAttribute->save();
+        }       
     }
     
     /**
@@ -496,8 +673,8 @@ class AdminMpImportProductsController extends ModuleAdminController
         $description = '';
         foreach($row as $key=>$value)
         {
-            if(Tools::strpos($key, 'DESC ')!==false) {
-                $key = Tools::substr($key, Tools::strlen('DESC  '));
+            if(Tools::strpos(Tools::strtolower($key), 'desc ')!==false) {
+                $key = Tools::substr($key, Tools::strlen('DESC '));
                 $description .= $this->addField($key, $value);
             }
         }
@@ -574,5 +751,20 @@ class AdminMpImportProductsController extends ModuleAdminController
         }
         $target = $imageTargetFolder . $image->id . '.' . $image->image_format;
         $copy = copy($imagePath, $target);
+    }
+    
+    /**
+     * Check if a string is contained in another string
+     * @param string $needle text to find
+     * @param string $haystack text container
+     * @return bool true if contains, false otherwise
+     */
+    private function contains($needle, $haystack)
+    {
+        $this->output[__FUNCTION__]['summary'][] = "needle: " . $needle . ", haystack: " . $haystack;
+        if(empty($needle) || empty($haystack)) {
+            return false;
+        }
+        return((bool)Tools::strpos(Tools::strtolower($needle), $haystack));
     }
 }

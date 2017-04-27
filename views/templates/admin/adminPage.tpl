@@ -27,7 +27,19 @@
     STATUS:
     {$status|@print_r}
 </pre>
-
+<style>
+    .se-pre-con {
+            position: fixed;
+            left: 0px;
+            top: 0px;
+            width: 100%;
+            height: 100%;
+            z-index: 999999;
+            background: url('../modules/mpimportproducts/views/img/cube.gif') center no-repeat #fff;
+            display: none;
+    }
+</style>
+<div class="se-pre-con"></div>
 <form class='defaultForm form-horizontal' method='post' id="form_export_invoices" enctype="multipart/form-data">
     <div class="panel">
         <div class="panel-heading">
@@ -46,7 +58,11 @@
             <br>
         </div>
         <div class='panel-footer'>
-            <button type="submit" value="1" id="submit_file_upload" name="submit_file_upload" class="btn btn-default pull-right">
+            <button type="button" value="1" id="button_file_upload" name="button_file_upload" class="btn btn-default pull-right">
+                <i class="icon-2x icon-upload-alt"></i> 
+                {l s='Upload Excel' mod='mpimportproducts'}
+            </button>
+            <button type="submit" value="1" id="submit_file_upload" name="submit_file_upload" style='display:none;'>
                 <i class="icon-2x icon-upload-alt"></i> 
                 {l s='Upload Excel' mod='mpimportproducts'}
             </button>
@@ -62,7 +78,11 @@
             </span>
         </div>
         <div class='panel-footer'>
-            <button type="submit" value="1" id="submit_file_import" name="submit_file_import" class="btn btn-default pull-right">
+            <button type="button" value="1" id="button_file_import" name="button_file_import" class="btn btn-default pull-right">
+                <i class="icon-download"></i> 
+                {l s='Import products' mod='mpimportproducts'}
+            </button>
+            <button type="submit" value="1" id="submit_file_import" name="submit_file_import" style='display:none;'>
                 <i class="icon-download"></i> 
                 {l s='Import products' mod='mpimportproducts'}
             </button>
@@ -87,6 +107,18 @@
     {    
         $("#checkAll").on("change",function(){
             $("input[name^='checkRow'").attr('checked',this.checked);
+        });
+        
+        $("#button_file_import").on('click', function(e) {
+            e.preventDefault();
+            $(".se-pre-con").fadeIn();
+            $("#submit_file_import").click();
+        });
+        
+        $("#button_file_upload").on("click", function(e) {
+            e.preventDefault();
+            $(".se-pre-con").fadeIn();
+            $("#submit_file_upload").click();
         });
     });
 </script>
