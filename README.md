@@ -29,3 +29,6 @@ Imports product from excel file, with custom parameters.
 *TODO*
  - [ ] Fix import product
  - [ ] Import attributes
+
+*207-05-03*
+- Splitting project in several classes
